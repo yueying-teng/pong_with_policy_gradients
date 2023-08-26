@@ -1,0 +1,4 @@
+PyVirtualDisplay==3.0
+piglet==1.0.0
+gym==0.26.2
+ale-py==0.8.1
