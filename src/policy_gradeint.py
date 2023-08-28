@@ -70,9 +70,10 @@ def run_episode(model, env, discount_factor, render=False):
     observation = env.reset()
     observation = observation[0]
     prev_x = preprocess(observation)
-
     action_chosen_log_probs = []
     rewards = []
+
+    taken_actions = []
 
     done = False
     timestep = 0
@@ -90,8 +91,10 @@ def run_episode(model, env, discount_factor, render=False):
 
         # Run the policy network and sample action from the returned probability
         prob_up = model(x)
+        # During training, the agent needs to balance exploration (trying new actions)
+        # and exploitation (choosing actions based on the current policy).
         action = UP if random.random() < prob_up else DOWN # roll the dice!
-
+        taken_actions.append(action)
         # Calculate the probability of the network sampling the chosen action
         action_chosen_prob = prob_up if action == UP else (1 - prob_up)
         action_chosen_log_probs.append(torch.log(action_chosen_prob))
@@ -118,8 +121,7 @@ def run_episode(model, env, discount_factor, render=False):
     # PG magic happens right here, multiplying action_chosen_log_probs by future reward.
     # Negate since the optimizer does gradient descent (instead of gradient ascent)
     loss = -(discounted_future_rewards * action_chosen_log_probs).sum()
-
-    return loss, rewards.sum()
+    return loss, rewards.sum(), taken_actions
 
 
 def train(env, model, learning_rate, discount_factor, batch_size, save_every_batches, render=False):
@@ -135,11 +137,10 @@ def train(env, model, learning_rate, discount_factor, batch_size, save_every_bat
         start_time = datetime.datetime.now().strftime('%H.%M.%S-%m.%d.%Y')
         last_batch = -1
 
-    optimizer = torch.optim.RMSprop(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     # Set up tensorboard logging
     writer = SummaryWriter(log_dir='tensorboard_logs', filename_suffix=start_time)
-
     # Pick up at the batch number we left off at to make tensorboard plots nicer
     batch = last_batch + 1
     while True:
@@ -147,10 +148,12 @@ def train(env, model, learning_rate, discount_factor, batch_size, save_every_bat
         mean_batch_reward = 0
         for _ in range(batch_size):
             # Run one episode
-            loss, episode_reward = run_episode(model, env, discount_factor, render)
+            loss, episode_reward, taken_actions = run_episode(model, env, discount_factor, render)
             mean_batch_loss += loss / batch_size
             mean_batch_reward += episode_reward / batch_size
             print(f'Episode reward total was {episode_reward}')
+            print(f'Episode loss was {loss}')
+            print(f'{taken_actions.count(2)} UP actions and {taken_actions.count(3)} DOWN actions were taken in the episode')
 
         # Backprop after `batch_size` episodes
         optimizer.zero_grad()

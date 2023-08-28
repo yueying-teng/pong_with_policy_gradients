@@ -11,6 +11,8 @@ from src.policy_gradeint import PolicyNetwork
 ale = ALEInterface()
 ale.loadROM(Pong)
 env = gym.make('ALE/Pong-v5', render_mode='rgb_array')
+print("List of available actions: ", env.unwrapped.get_action_meanings())
+
 env.seed(2023)
 # %%
 # Run a demo of the environment
