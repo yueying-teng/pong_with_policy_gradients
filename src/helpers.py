@@ -2,7 +2,6 @@ import random
 import numpy as np
 from matplotlib import animation
 import matplotlib.pyplot as plt
-from IPython.display import display, HTML
 import torch
 
 
@@ -12,7 +11,7 @@ np.random.seed(2023)
 UP = 2
 DOWN = 3
 
-def display_frames_as_gif(frames):
+def save_frames_as_gif(frames, fn):
     """
     Displays a list of frames as a gif, with controls
     """
@@ -25,7 +24,7 @@ def display_frames_as_gif(frames):
 
     anim = animation.FuncAnimation(plt.gcf(), animate, frames = len(frames), interval=50)
     plt.close(anim._fig)
-    display(HTML(anim.to_jshtml()))
+    anim.save(f'{fn}.gif')
 
 
 def preprocess(image):
@@ -59,7 +58,7 @@ def model_step(model, observation, prev_x):
     return action, prev_x
 
 
-def play_game(env, model):
+def play_game(env, model, fn):
     observation = env.reset()
     observation = observation[0]
     prev_x = preprocess(observation) # at the beginning of the game, cur_x and prev_x are idential
@@ -78,5 +77,5 @@ def play_game(env, model):
 
     print("Episode finished without success, accumulated reward = {}".format(cumulated_reward))
     env.close()
-    display_frames_as_gif(frames)
+    save_frames_as_gif(frames, fn)
 
