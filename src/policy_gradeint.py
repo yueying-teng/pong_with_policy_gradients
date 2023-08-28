@@ -7,10 +7,10 @@ import datetime
 import os
 import random
 import time
-import tensorflow as tf
+from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.nn as nn
-from helpers import preprocess
+from src.helpers import preprocess
 
 
 # labels of the moving up and down in Pong
@@ -135,17 +135,14 @@ def train(env, model, learning_rate, discount_factor, batch_size, save_every_bat
         start_time = datetime.datetime.now().strftime('%H.%M.%S-%m.%d.%Y')
         last_batch = -1
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.RMSprop(model.parameters(), lr=learning_rate)
 
-    # # Set up tensorboard logging
-    # tf_writer = tf.summary.create_file_writer(
-    #     os.path.join('tensorboard_logs', start_time))
-    # tf_writer.set_as_default()
+    # Set up tensorboard logging
+    writer = SummaryWriter(log_dir='tensorboard_logs', filename_suffix=start_time)
 
     # Pick up at the batch number we left off at to make tensorboard plots nicer
     batch = last_batch + 1
     while True:
-
         mean_batch_loss = 0
         mean_batch_reward = 0
         for _ in range(batch_size):
@@ -163,8 +160,8 @@ def train(env, model, learning_rate, discount_factor, batch_size, save_every_bat
         # Batch metrics and tensorboard logging
         print(f'Batch: {batch}, mean loss: {mean_batch_loss:.2f}, '
               f'mean reward: {mean_batch_reward:.2f}')
-        # tf.summary.scalar('mean loss', mean_batch_loss.detach().item(), step=batch)
-        # tf.summary.scalar('mean reward', mean_batch_reward.detach().item(), step=batch)
+        writer.add_scalar('mean_loss', mean_batch_loss.detach().item(), global_step=batch)
+        writer.add_scalar('mean_reward', mean_batch_reward.detach().item(), global_step=batch)
 
         if batch % save_every_batches == 0:
             print('Saving checkpoint...')
@@ -176,4 +173,3 @@ def train(env, model, learning_rate, discount_factor, batch_size, save_every_bat
             torch.save(save_dict, 'pg_params.pth')
 
         batch += 1
-

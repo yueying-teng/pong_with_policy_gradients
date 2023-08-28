@@ -7,7 +7,7 @@ from src.policy_gradeint import PolicyNetwork, train
 # %%
 discount_factor = 0.99 # discount factor for reward
 
-batch_size = 4
+batch_size = 20
 save_every_batches = 5
 learning_rate = 7e-4
 
