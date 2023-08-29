@@ -2,14 +2,10 @@ import random
 import numpy as np
 from matplotlib import animation
 import matplotlib.pyplot as plt
-import torch
 
 
 random.seed(2023)
 np.random.seed(2023)
-# labels of the moving up and down in Pong
-UP = 2
-DOWN = 3
 
 def save_frames_as_gif(frames, fn):
     """
@@ -32,8 +28,6 @@ def preprocess(image):
     Pre-process 210x160x3 uint8 frame into 6400 (80x80) 1D float vector.
     """
 
-    image = torch.Tensor(image)
-
     # Crop, downsample by factor of 2, and turn to grayscale by keeping only red channel
     image = image[35: 195]
     image = image[::2, ::2, 0]
@@ -42,7 +36,7 @@ def preprocess(image):
     image[image == 109] = 0 # erase background (background type 2)
     image[image != 0] = 1 # everything else (paddles, ball) just set to 1
 
-    return image.flatten().float()
+    return image.astype(float).ravel()
 
 
 def model_step(model, observation, prev_x):
@@ -52,16 +46,17 @@ def model_step(model, observation, prev_x):
     prev_x = cur_x
 
     # run the policy network and sample an action from the returned probability
-    prob_up = model(x)
-    action = UP if random.random() < prob_up else DOWN # roll the dice!
+    action = model.select_action(x)
+    action_env = action + 2
 
-    return action, prev_x
+    return action_env, prev_x
 
 
 def play_game(env, model, fn):
     observation = env.reset()
     observation = observation[0]
-    prev_x = preprocess(observation) # at the beginning of the game, cur_x and prev_x are idential
+
+    prev_x = preprocess(observation) # at the beginning of the game, cur_x and prev_x are identical
 
     frames = []
     cumulated_reward = 0
