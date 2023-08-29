@@ -5,174 +5,176 @@ reference https://gist.github.com/karpathy/a4166c7fe253700972fcbc77e4ea32c5
 
 import datetime
 import os
-import random
-import time
-from torch.utils.tensorboard import SummaryWriter
+import numpy as np
+from itertools import count
+
 import torch
+from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.autograd import Variable
+from torch.distributions import Categorical
+
 from src.helpers import preprocess
 
 
-# labels of the moving up and down in Pong
-UP = 2
-DOWN = 3
-
 is_cuda = torch.cuda.is_available()
+torch.manual_seed(2023)
 
 
-def calc_discounted_future_rewards(rewards, discount_factor):
+class PolicyNetwork(nn.Module):
+    def __init__(self, input_size, hidden_size, num_actions=2):
+        super(PolicyNetwork, self).__init__()
+        self.input_size = input_size
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc3 = nn.Linear(hidden_size, num_actions) # action 1: static, action 2: move up, action 3: move down
+
+        self.saved_log_probs = []
+        self.rewards = []
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        action_scores = self.fc3(x)
+        return F.softmax(action_scores, dim=1)
+
+    def select_action(self, x):
+        x = Variable(torch.from_numpy(x).float().unsqueeze(0))
+        if is_cuda:
+            x = x.cuda()
+        probs = self.forward(x)
+
+        m = Categorical(probs)
+        action = m.sample()
+
+        self.saved_log_probs.append(m.log_prob(action))
+        return action
+
+
+def run_episode(model, env, episode_number, prev_x, running_reward):
+    """
+    Run the game for one episode.
+    """
+    reward_sum = 0
+    observation = env.reset()[0]
+
+    for _ in range(10000):
+        cur_x = preprocess(observation)
+        # Input to the network is the difference between two frames
+        x = cur_x - prev_x if prev_x is not None else np.zeros(model.input_size)
+
+        prev_x = cur_x
+
+        # Run the policy network and sample action from the returned probability
+        # During training, the agent needs to balance exploration (trying new actions)
+        # and exploitation (choosing actions based on the current policy).
+        action = model.select_action(x)
+        action_env = action + 2
+        # Make one move using the chosen action to get the new measurements,
+        # and updated discounted_reward
+        observation, reward, done, _, _ = env.step(action_env)
+        reward_sum += reward
+
+        model.rewards.append(reward)
+
+        if done:
+            running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
+            print('REINFORCE ep %03d done. reward: %f. reward running mean: %f' % (episode_number, reward_sum, running_reward))
+            break
+
+    return running_reward, prev_x
+
+
+def calc_discounted_future_rewards(model, discount_factor):
     """
     Calculate discounted future reward at each timestep.
 
     discounted_future_reward[t] = \sum_{k=1} discount_factor^k * reward[t+k]
     """
+    R = 0
+    policy_loss = []
+    # Discounted future reward at EACH timestep
+    episode_reward = []
+    for r in model.rewards[::-1]:
+        R = r + discount_factor * R
+        episode_reward.insert(0, R)
+    # Turn rewards to pytorch tensor and standardize
+    episode_reward = torch.Tensor(episode_reward)
+    # Standardize the rewards to have mean 0, std. deviation 1 (helps control the variance of the gradient estimator).
+    episode_reward = (episode_reward - episode_reward.mean()) / (episode_reward.std() + 1e-6)
 
-    discounted_future_rewards = torch.empty(len(rewards))
-
-    discounted_future_reward = 0
-    for t in range(len(rewards) - 1, -1, -1):
-        # If rewards[t] != 0, we are at game boundary (win or loss) so we
-        # reset discounted_future_reward to 0 (this is pong specific!)
-        if rewards[t] != 0:
-            discounted_future_reward = 0
-
-        discounted_future_reward = rewards[t] + discount_factor * discounted_future_reward
-        discounted_future_rewards[t] = discounted_future_reward
-
-    return discounted_future_rewards
-
-
-class PolicyNetwork(nn.Module):
-    """
-    Simple two-layer MLP as the policy network.
-    """
-
-    def __init__(self, input_size, hidden_size):
-        super().__init__()
-
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, 1)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = nn.functional.relu(x)
-
-        x = self.fc2(x)
-        prob_up = torch.sigmoid(x)
-
-        return prob_up
-
-
-def run_episode(model, env, discount_factor, render=False):
-    """
-    Run the game for one episode.
-    """
-    observation = env.reset()
-    observation = observation[0]
-    prev_x = preprocess(observation)
-    action_chosen_log_probs = []
-    rewards = []
-
-    taken_actions = []
-
-    done = False
-    timestep = 0
-
-    while not done:
-        if render:
-            # Render the game window at 30fps
-            time.sleep(1 / 30)
-            env.render()
-
-        # Input to the network is the difference between two frames
-        cur_x = preprocess(observation)
-        x = cur_x - prev_x
-        prev_x = cur_x
-
-        # Run the policy network and sample action from the returned probability
-        prob_up = model(x)
-        # During training, the agent needs to balance exploration (trying new actions)
-        # and exploitation (choosing actions based on the current policy).
-        action = UP if random.random() < prob_up else DOWN # roll the dice!
-        taken_actions.append(action)
-        # Calculate the probability of the network sampling the chosen action
-        action_chosen_prob = prob_up if action == UP else (1 - prob_up)
-        action_chosen_log_probs.append(torch.log(action_chosen_prob))
-
-        # Make one move using the chosen action to get the new measurements,
-        # and updated discounted_reward
-        _, reward, done, _, _ = env.step(action)
-        rewards.append(torch.Tensor([reward]))
-        timestep += 1
-
-    # Concat lists of log probs and rewards into 1-D tensors
-    action_chosen_log_probs = torch.cat(action_chosen_log_probs)
-    rewards = torch.cat(rewards)
-
-    # Calculate the discounted future reward at each timestep
-    discounted_future_rewards = calc_discounted_future_rewards(rewards, discount_factor)
-
-    # Standardize the rewards to have mean 0, std. deviation 1 (helps control the gradient estimator variance).
-    # It encourages roughly half of the actions to be rewarded and half to be discouraged, which
-    # is helpful especially in the beginning when positive reward signals are rare.
-    discounted_future_rewards = (discounted_future_rewards - discounted_future_rewards.mean()) \
-                                     / discounted_future_rewards.std()
-
-    # PG magic happens right here, multiplying action_chosen_log_probs by future reward.
+    # Policy gradient magic happens here, multiplying saved_log_probs by discounted future reward.
     # Negate since the optimizer does gradient descent (instead of gradient ascent)
-    loss = -(discounted_future_rewards * action_chosen_log_probs).sum()
-    return loss, rewards.sum(), taken_actions
+    for log_prob, reward in zip(model.saved_log_probs, episode_reward):
+        policy_loss.append(-log_prob * reward)
+    policy_loss = torch.stack(policy_loss).sum()
+
+    return policy_loss
 
 
-def train(env, model, learning_rate, discount_factor, batch_size, save_every_batches, render=False):
+def train(env, model, learning_rate, discount_factor, batch_size, save_every_episodes, weight_decay, total_episodes):
+    if is_cuda:
+        model.cuda()
+
     # Load model weights and metadata from checkpoint if exists
     if os.path.exists('pg_params.pth'):
         print('Loading from checkpoint...')
         save_dict = torch.load('pg_params.pth')
-
         model.load_state_dict(save_dict['model_weights'])
         start_time = save_dict['start_time']
-        last_batch = save_dict['last_batch']
     else:
         start_time = datetime.datetime.now().strftime('%H.%M.%S-%m.%d.%Y')
-        last_batch = -1
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.RMSprop(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     # Set up tensorboard logging
     writer = SummaryWriter(log_dir='tensorboard_logs', filename_suffix=start_time)
-    # Pick up at the batch number we left off at to make tensorboard plots nicer
-    batch = last_batch + 1
-    while True:
-        mean_batch_loss = 0
-        mean_batch_reward = 0
-        for _ in range(batch_size):
-            # Run one episode
-            loss, episode_reward, taken_actions = run_episode(model, env, discount_factor, render)
-            mean_batch_loss += loss / batch_size
-            mean_batch_reward += episode_reward / batch_size
-            print(f'Episode reward total was {episode_reward}')
-            print(f'Episode loss was {loss}')
-            print(f'{taken_actions.count(2)} UP actions and {taken_actions.count(3)} DOWN actions were taken in the episode')
+
+    running_reward = None
+    prev_x = None
+    mean_batch_loss = 0
+    mean_batch_reward = 0
+
+    for episode_number in count(1):
+        # Run one episode
+        running_reward, prev_x = run_episode(model, env, episode_number, prev_x=prev_x, running_reward=running_reward)
+
+        # Discounted future rewards for one episode
+        policy_loss = calc_discounted_future_rewards(model, discount_factor)
+        episode_reward_sum = sum(model.rewards)
+        del model.rewards[:]
+        del model.saved_log_probs[:]
+
+        mean_batch_loss += policy_loss / batch_size
+        mean_batch_reward += episode_reward_sum / batch_size
 
         # Backprop after `batch_size` episodes
-        optimizer.zero_grad()
-        mean_batch_loss.backward()
-        optimizer.step()
+        if episode_number % batch_size == 0:
+            optimizer.zero_grad()
+            if is_cuda:
+                mean_batch_loss.cuda()
+            mean_batch_loss.backward()
+            optimizer.step()
 
-        # Batch metrics and tensorboard logging
-        print(f'Batch: {batch}, mean loss: {mean_batch_loss:.2f}, '
-              f'mean reward: {mean_batch_reward:.2f}')
-        writer.add_scalar('mean_loss', mean_batch_loss.detach().item(), global_step=batch)
-        writer.add_scalar('mean_reward', mean_batch_reward.detach().item(), global_step=batch)
+            print(f'at episode_number {episode_number}')
+            print('mean_loss', mean_batch_loss.detach().item())
+            print('mean_reward', mean_batch_reward)
+            writer.add_scalar('mean_loss', mean_batch_loss.detach().item(), global_step=episode_number)
+            writer.add_scalar('mean_reward', mean_batch_reward, global_step=episode_number)
 
-        if batch % save_every_batches == 0:
-            print('Saving checkpoint...')
+            mean_batch_loss = 0
+            mean_batch_reward = 0
+
+        # Save model in every save_every_episodes episode
+        if episode_number % save_every_episodes == 0:
+            print('ep %d: model saving...' % (episode_number))
             save_dict = {
                 'model_weights': model.state_dict(),
                 'start_time': start_time,
-                'last_batch': batch
             }
             torch.save(save_dict, 'pg_params.pth')
 
-        batch += 1
+        if episode_number == total_episodes:
+            break
