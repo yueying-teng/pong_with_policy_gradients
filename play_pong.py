@@ -30,7 +30,7 @@ for t in range(10000):
 print("Episode finished without success, accumulated reward = {}".format(cumulated_reward))
 env.close()
 
-save_frames_as_gif(frames, fn='demo_pong')
+save_frames_as_gif(frames, fn='resources/demo_pong')
 
 # play pong with the trained agent
 input_size = 80 * 80
@@ -38,5 +38,5 @@ hidden_size = 200
 model = PolicyNetwork(input_size, hidden_size)
 model.load_state_dict(torch.load('pg_params.pth')['model_weights'])
 
-play_game(env, model, fn='play_pong')
+play_game(env, model, fn='resources/play_pong')
 

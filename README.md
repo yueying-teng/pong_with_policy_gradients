@@ -3,7 +3,7 @@
 Train an agent to play Pong using OpenAI Gym and policy gradient.
 
 <p align="center">
-  <img src="play_pong.gif" width="250" height="350" />
+  <img src="resources/play_pong.gif" width="250" height="350" />
 </p>
 
 ## How to use
@@ -35,4 +35,12 @@ Train an agent to play Pong using OpenAI Gym and policy gradient.
     python3 play_pong.py
     ```
 
-## Results
+## Training results
+6000 episodes were used for training.
+In the end, mean reward is approaching 0, which means that the trained agent is able to achieve a tie with the environment.
+
+<img src="resources/mean_loss_every_batch_episodes.png" width="500" height="200" /><img src="resources/mean_reward_every_batch_episodes.png" width="500" height="200" />
+
+Play Pong before vs after training
+
+<img src="resources/demo_pong.gif" width="250" height="350" /><img src="resources/play_pong.gif" width="250" height="350" />

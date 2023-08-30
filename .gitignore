@@ -3,6 +3,5 @@ ROMS/**
 HC ROMS/**
 pg_params.pth
 src/__pycache__/**
-tensorboard_logs/**
 **/.DS_Store
 .DS_Store
