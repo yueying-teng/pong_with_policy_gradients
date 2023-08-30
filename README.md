@@ -39,6 +39,7 @@ Train an agent to play Pong using OpenAI Gym and policy gradient.
 6000 episodes were used for training.
 In the end, mean reward is approaching 0, which means that the trained agent is able to achieve a tie with the environment.
 
+Training was done on CPU (Apple M1 Pro) only, and it tool around 14 hours to train the simple 3 layer policy network (linear & relu) using 6000 episodes. Memory consumption
 <img src="resources/mean_loss_every_batch_episodes.png" width="500" height="200" /><img src="resources/mean_reward_every_batch_episodes.png" width="500" height="200" />
 
 Play Pong before vs after training
